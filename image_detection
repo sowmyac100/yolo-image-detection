@@ -1,0 +1,59 @@
+import pytesseract
+import torch
+from PIL import Image
+import cv2
+import numpy as np
+import fitz  # PyMuPDF
+from pdf2image import convert_from_path
+
+# 1. PDF to Image Conversion (using pdf2image or PyMuPDF)
+def pdf_to_images_v2(pdf_path):
+    return convert_from_path(pdf_path)
+
+# 2. YOLO Detection (YOLOv5)
+def detect_objects_yolo(image_path):
+    model = torch.hub.load('ultralytics/yolov5', 'yolov5s')  # Load pre-trained YOLOv5 model
+    img = Image.open(image_path)  # Load image
+    results = model(img)  # Detect objects using YOLO
+    results.show()  # Show the image with bounding boxes
+    return results.pandas().xywh  # Get the results in a pandas dataframe
+
+# 3. OCR for Text Extraction (Tesseract)
+def extract_text_from_image(image):
+    text = pytesseract.image_to_string(image)
+    return text
+
+# 4. Combined Detection and OCR
+def find_tj_in_pdf(pdf_path):
+    images = pdf_to_images_v2(pdf_path)  # Convert PDF to images
+
+    tj_occurrences = []
+
+    for img in images:
+        img_cv = np.array(img)  # Convert PIL Image to OpenCV format for further processing
+        results = detect_objects_yolo(img_cv)  # Run YOLO object detection
+        
+        # Iterate over the detected bounding boxes
+        for _, row in results.iterrows():
+            xmin, ymin, xmax, ymax = int(row['xmin']), int(row['ymin']), int(row['xmax']), int(row['ymax'])
+            
+            # Crop the region where text is detected (bbox from YOLO)
+            cropped_img = img_cv[ymin:ymax, xmin:xmax]
+
+            # Perform OCR on cropped image
+            ocr_text = extract_text_from_image(Image.fromarray(cropped_img))
+            print(f"OCR Text: {ocr_text}")
+
+            # Check if OCR text contains 'Tj' or junction temperature
+            if 'Tj' in ocr_text:
+                tj_occurrences.append((xmin, ymin, xmax, ymax, ocr_text))
+
+    return tj_occurrences
+
+# Example usage
+pdf_path = 'your_pdf_file.pdf'
+tj_data = find_tj_in_pdf(pdf_path)
+
+# Output the results
+for bbox, text in tj_data:
+    print(f"Found 'Tj' in region {bbox} with OCR text: {text}")
